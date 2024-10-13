@@ -1,63 +1,9 @@
-"""
-NLU Intent Classification with Batch Processing and Prompt Caching
-
-This script performs Natural Language Understanding (NLU) intent classification using both OpenAI and Anthropic APIs. 
-It processes a dataset of utterances, classifies their intents, and evaluates the performance of both AI models.
-
-Key Features:
-1. Batch Processing: Instead of making individual API calls for each utterance, the script uses batch processing 
-   to send multiple requests at once, improving efficiency and reducing overall processing time.
-2. Prompt Caching: The script leverages prompt caching mechanisms provided by both OpenAI and Anthropic to reduce 
-   costs and improve response times for similar prompts.
-3. Parallel Processing: The script processes batches for OpenAI and Anthropic in parallel, allowing for 
-   simultaneous evaluation of both services.
-4. Performance Evaluation: After processing, the script evaluates the accuracy of intent classifications for both APIs.
-
-How it works:
-1. Environment Setup:
-   - Loads environment variables from a .env file, including API keys, model names, and system prompts.
-   - Initializes API clients for both OpenAI and Anthropic.
-
-2. Data Loading:
-   - Loads the dataset of utterances to be classified from a JSON file.
-
-3. OpenAI Batch Processing:
-   - Prepares a batch file in JSONL format for OpenAI, including system prompts and utterances.
-   - Uploads the batch file to OpenAI's servers.
-   - Creates and submits a batch job to OpenAI's API.
-   - Polls for job completion, waiting up to 24 hours.
-   - Retrieves and processes the results once the batch job is complete.
-
-4. Anthropic Batch Processing:
-   - Prepares batch data for Anthropic, including system prompts with cache control for prompt caching.
-   - Submits the batch to Anthropic's API.
-   - Polls for job completion, waiting up to 24 hours.
-   - Retrieves and processes the results once the batch job is complete.
-
-5. Result Processing:
-   - Parses the responses from both APIs into a structured format.
-   - Evaluates the accuracy of intent classifications for each API.
-
-6. Output Generation:
-   - Combines the results and evaluations into a single JSON output.
-   - Writes the output to a file for further analysis.
-
-Prompt Caching Details:
-- For OpenAI: The script structures prompts with the system message first, followed by the user message. 
-  OpenAI's API automatically handles caching for prompts longer than 1024 tokens.
-- For Anthropic: The script explicitly marks the system prompt for caching using the cache_control parameter. 
-  This allows Anthropic to reuse the cached prompt for multiple requests, reducing processing time and costs.
-
-Note: To use this script effectively, ensure that your .env file is properly configured with all necessary 
-API keys, model names, and system prompts. Also, make sure that your system prompts are substantial enough 
-to benefit from caching, especially for Anthropic (aim for at least 1024 tokens for Claude 3.5 Sonnet and 
-Claude 3 Opus, or 2048 tokens for Claude 3 Haiku).
-"""
 import json
 import os
 import time
 import asyncio
 import logging
+import glob
 from typing import List, Dict, Any
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
@@ -82,12 +28,19 @@ except Exception as e:
     raise
 
 # Define data structures
-class IntentClassification(BaseModel):
+class IntentPrediction(BaseModel):
     intent: str
     confidence: float
 
+class IntentClassification(BaseModel):
+    predicted_intent: IntentPrediction
+    second_predicted_intent: IntentPrediction
+    true_intent: str
+    match: bool
+
 class ClassificationResult(BaseModel):
     custom_id: str
+    utterance: str
     classification: IntentClassification
 
 # Load dataset
@@ -104,17 +57,25 @@ def load_dataset(file_path: str) -> List[Dict[str, Any]]:
         logger.error(f"Invalid JSON in dataset file: {file_path}")
         raise
 
-# Prepare system prompt
+# Extract intents for a company
+def extract_intents(company_data: Dict[str, Any]) -> List[str]:
+    intents = list(set([example["class"] for example in company_data.get("Examples", [])]))
+    logger.info(f"Extracted intents for {company_data['Company Name']}: {intents}")
+    return intents
+
+# Prepare system prompt with available intents
 def prepare_system_prompt(company_data: Dict[str, Any], base_prompt: str) -> str:
     company_name = company_data["Company Name"]
-    topics = company_data.get("Taxonomy", [])
+    intents = extract_intents(company_data)
     
-    topic_list = "\n".join([f"{topic['Topic Name']}: {topic['Topic Description']}" for topic in topics])
+    available_intents = "\n".join([f"- {intent}" for intent in intents])
     
-    return f"{base_prompt}\n\nCompany: {company_name}\n\nAvailable Intents:\n{topic_list}"
+    system_prompt = f"{base_prompt}\n\nCompany: {company_name}\n\nAvailable Intents:\n{available_intents}"
+    logger.info(f"Prepared system prompt for {company_name}. Available Intents:\n{available_intents}")
+    return system_prompt
 
 # Prepare OpenAI batch
-async def prepare_openai_batch(dataset: List[Dict[str, Any]], system_prompt: str) -> str:
+def prepare_openai_batch(dataset: Dict[str, Any], system_prompt: str) -> str:
     batch_data = []
     
     for i, item in enumerate(dataset["Examples"]):
@@ -132,7 +93,7 @@ async def prepare_openai_batch(dataset: List[Dict[str, Any]], system_prompt: str
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": item['sample_text']}
                 ],
-                "max_tokens": 100,
+                "max_tokens": 150,
                 "response_format": {"type": "json_object"}
             }
         }
@@ -142,11 +103,16 @@ async def prepare_openai_batch(dataset: List[Dict[str, Any]], system_prompt: str
     with open(batch_file, 'w') as f:
         f.write('\n'.join(batch_data))
     logger.info(f"OpenAI batch file prepared: {batch_file}")
+    logger.info(f"Sample system prompt in OpenAI batch: {system_prompt[:500]}...")  # Log first 500 characters
     return batch_file
 
 # Process OpenAI batch
-async def process_openai_batch(batch_file: str, company_name: str) -> List[ClassificationResult]:
+async def process_openai_batch(batch_file: str, company_name: str, fake_batches: bool) -> str:
     try:
+        if fake_batches:
+            logger.info(f"Fake batch processing for OpenAI - {company_name}")
+            return f"fake_batch_id_openai_{company_name}"
+
         # Upload batch file
         with open(batch_file, "rb") as f:
             file = await openai_client.files.create(file=f, purpose="batch")
@@ -166,7 +132,7 @@ async def process_openai_batch(batch_file: str, company_name: str) -> List[Class
         raise
 
 # Prepare Anthropic batch
-async def prepare_anthropic_batch(dataset: List[Dict[str, Any]], system_prompt: str) -> List[Dict[str, Any]]:
+def prepare_anthropic_batch(dataset: Dict[str, Any], system_prompt: str) -> List[Dict[str, Any]]:
     batch_data = []
     for i, item in enumerate(dataset["Examples"]):
         if 'sample_text' not in item:
@@ -177,7 +143,7 @@ async def prepare_anthropic_batch(dataset: List[Dict[str, Any]], system_prompt: 
             "custom_id": f"utterance_{i}",
             "params": {
                 "model": os.getenv("ANTHROPIC_MODEL"),
-                "max_tokens": 100,
+                "max_tokens": 150,
                 "system": system_prompt,
                 "messages": [
                     {"role": "user", "content": item['sample_text']}
@@ -185,12 +151,20 @@ async def prepare_anthropic_batch(dataset: List[Dict[str, Any]], system_prompt: 
             }
         })
 
-    logger.info(f"Anthropic batch prepared for {dataset['Company Name']} with {len(batch_data)} items")
+    batch_file = f"anthropic_batch_{dataset['Company Name']}.json"
+    with open(batch_file, 'w') as f:
+        json.dump(batch_data, f, indent=2)
+    logger.info(f"Anthropic batch file prepared: {batch_file}")
+    logger.info(f"Sample system prompt in Anthropic batch: {system_prompt[:500]}...")  # Log first 500 characters
     return batch_data
 
 # Process Anthropic batch
-async def process_anthropic_batch(batch_data: List[Dict[str, Any]], company_name: str) -> str:
+async def process_anthropic_batch(batch_data: List[Dict[str, Any]], company_name: str, fake_batches: bool) -> str:
     try:
+        if fake_batches:
+            logger.info(f"Fake batch processing for Anthropic - {company_name}")
+            return f"fake_batch_id_anthropic_{company_name}"
+
         # Create batch
         batch = await anthropic_client.beta.messages.batches.create(requests=batch_data)
         logger.info(f"Anthropic batch created for {company_name}: {batch.id}")
@@ -200,56 +174,229 @@ async def process_anthropic_batch(batch_data: List[Dict[str, Any]], company_name
         logger.error(f"Error processing Anthropic batch for {company_name}: {e}")
         raise
 
+# Save batch results to a local file
+async def save_batch_results(api_type: str, batch_id: str, company_name: str, content: str):
+    file_name = f"{api_type}_results_{company_name}_{batch_id}.json"
+    with open(file_name, 'w') as f:
+        f.write(content)
+    logger.info(f"Batch results saved to {file_name}")
+    return file_name
+
 # Check batch status and retrieve results
-async def check_batch_status(api_type: str, batch_id: str, company_name: str):
+async def check_batch_status(api_type: str, batch_id: str, company_name: str, fake_batches: bool, dataset: Dict[str, Any]):
+    start_time = time.time()
     while True:
         try:
+            if fake_batches:
+                # Simulate batch processing
+                await asyncio.sleep(5)
+                logger.info(f"Fake batch completed for {api_type} - {company_name}")
+                return [{"custom_id": "utterance_0", "classification": {"intent": "fake_intent", "confidence": 0.9}}]
+
             if api_type == "openai":
                 batch_status = await openai_client.batches.retrieve(batch_id)
+                logger.info(f"OpenAI batch status for {company_name}: {batch_status.status}")
+                logger.info(f"Progress: Total: {batch_status.request_counts.total}, Completed: {batch_status.request_counts.completed}, Failed: {batch_status.request_counts.failed}")
+                
                 if batch_status.status == "completed":
-                    results = await openai_client.files.content(batch_status.output_file_id)
-                    results_data = [json.loads(line) for line in results.splitlines()]
-                    logger.info(f"Retrieved {len(results_data)} results from OpenAI for {company_name}")
-                    return results_data
+                    content = await openai_client.files.content(batch_status.output_file_id)
+                    file_name = await save_batch_results("openai", batch_id, company_name, content.text)
+                    logger.info(f"OpenAI results saved to {file_name}")
+                    return file_name
             elif api_type == "anthropic":
                 batch_status = await anthropic_client.beta.messages.batches.retrieve(batch_id)
+                logger.info(f"Anthropic batch status for {company_name}: {batch_status.processing_status}")
+                logger.info(f"Progress: Processing: {batch_status.request_counts.processing}, Succeeded: {batch_status.request_counts.succeeded}, Errored: {batch_status.request_counts.errored}")
+                
                 if batch_status.processing_status == "ended":
                     results = []
-                    async for result in anthropic_client.beta.messages.batches.results(batch_id):
-                        if result.result.type == "succeeded":
-                            content = json.loads(result.result.message.content[0].text)
-                            results.extend(content['classifications'])
-                    logger.info(f"Retrieved {len(results)} results from Anthropic for {company_name}")
-                    return results
+                    batch_results = await anthropic_client.beta.messages.batches.results(batch_id)
+                    async for result in batch_results:
+                        results.append(result)
+                    
+                    file_name = await save_batch_results("anthropic", batch_id, company_name, json.dumps(results, default=lambda x: x.__dict__))
+                    logger.info(f"Anthropic results saved to {file_name}")
+                    return file_name
         except Exception as e:
             logger.error(f"Error checking batch status for {api_type} - {company_name}: {e}")
             return None
 
+        if time.time() - start_time > 86400:  # 24 hours
+            logger.error(f"Batch processing timeout for {api_type} - {company_name}")
+            return None
+
         await asyncio.sleep(60)  # Wait for 1 minute before checking again
 
+def load_jsonl_file(file_path: str) -> List[Any]:
+    with open(file_path, 'r') as f:
+        return [json.loads(line) for line in f]
+
+def load_json_file(file_path: str) -> Any:
+    with open(file_path, 'r') as f:
+        return json.load(f)
+
+# Process OpenAI results
+def process_openai_results(file_path: str, dataset: Dict[str, Any]) -> List[Dict[str, Any]]:
+    results = load_jsonl_file(file_path)
+    processed_results = []
+    
+    for result, example in zip(results, dataset["Examples"]):
+        try:
+            content = json.loads(result["response"]["body"]["choices"][0]["message"]["content"])
+            classification = content['classifications'][0]['classification']
+            true_intent = example['class']
+            utterance = example['sample_text']
+            
+            processed_results.append({
+                "custom_id": result["custom_id"],
+                "utterance": utterance,
+                "classification": {
+                    "predicted_intent": {
+                        "intent": classification['intent1'],
+                        "confidence": classification['confidence1']
+                    },
+                    "second_predicted_intent": {
+                        "intent": classification['intent2'],
+                        "confidence": classification['confidence2']
+                    },
+                    "true_intent": true_intent,
+                    "match": classification['intent1'].lower() == true_intent.lower()
+                }
+            })
+        except (KeyError, json.JSONDecodeError):
+            processed_results.append({
+                "custom_id": result["custom_id"],
+                "utterance": example['sample_text'],
+                "classification": {
+					"predicted_intent": {"intent": "unknown", "confidence": 0.0},
+						"second_predicted_intent": {"intent": "unknown", "confidence": 0.0},
+						"true_intent": example['class'],
+						"match": False
+                }
+            })
+    
+    return processed_results
+
+# Process Anthropic results
+def process_anthropic_results(file_path: str, dataset: Dict[str, Any]) -> List[Dict[str, Any]]:
+    results = load_json_file(file_path)
+    processed_results = []
+    
+    for result, example in zip(results, dataset["Examples"]):
+        try:
+            content = json.loads(result['result']['message']['content'][0]['text'])
+            classification = content['classifications'][0]['classification']
+            true_intent = example['class']
+            utterance = example['sample_text']
+            
+            processed_results.append({
+                "custom_id": result['custom_id'],
+                "utterance": utterance,
+                "classification": {
+                    "predicted_intent": {
+                        "intent": classification['intent1'],
+                        "confidence": classification['confidence1']
+                    },
+                    "second_predicted_intent": {
+                        "intent": classification['intent2'],
+                        "confidence": classification['confidence2']
+                    },
+                    "true_intent": true_intent,
+                    "match": classification['intent1'].lower() == true_intent.lower()
+                }
+            })
+        except (KeyError, json.JSONDecodeError):
+            processed_results.append({
+                "custom_id": result['custom_id'],
+                "utterance": example['sample_text'],
+                "classification": {
+                    "predicted_intent": {"intent": "unknown", "confidence": 0.0},
+                    "second_predicted_intent": {"intent": "unknown", "confidence": 0.0},
+                    "true_intent": example['class'],
+                    "match": False
+                }
+            })
+    
+    return processed_results
+
 # Evaluate results
-def evaluate_results(results: List[ClassificationResult], dataset: List[Dict[str, Any]]) -> Dict[str, Any]:
+def evaluate_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     total = len(results)
-    correct = sum(1 for r, d in zip(results, dataset["Examples"]) if r['classification']['intent'] == d['class'])
+    correct = sum(1 for r in results if r['classification']['match'])
     accuracy = correct / total if total > 0 else 0
-    logger.info(f"Evaluation results: Total={total}, Correct={correct}, Accuracy={accuracy:.2f}")
     return {
         "total_attempts": total,
         "correct_matches": correct,
-        "errors": total - correct,
         "accuracy": accuracy
     }
 
-# Write partial results
-def write_partial_results(output: Dict[str, Any], file_path: str):
+def process_company_results(company_name: str, openai_file: str, anthropic_file: str, dataset: Dict[str, Any]) -> Dict[str, Any]:
+    openai_results = process_openai_results(openai_file, dataset)
+    anthropic_results = process_anthropic_results(anthropic_file, dataset)
+    
+    return {
+        "OpenAI": {
+            "results": openai_results,
+            "evaluation": evaluate_results(openai_results)
+        },
+        "Anthropic": {
+            "results": anthropic_results,
+            "evaluation": evaluate_results(anthropic_results)
+        }
+    }
+
+def calculate_overall_performance(company_results: Dict[str, Any]) -> Dict[str, Any]:
+    overall_performance = {"OpenAI": {}, "Anthropic": {}}
+    
+    for api in ["OpenAI", "Anthropic"]:
+        total_correct = sum(company_data[api]["evaluation"]["correct_matches"] for company_data in company_results.values())
+        total_attempts = sum(company_data[api]["evaluation"]["total_attempts"] for company_data in company_results.values())
+        overall_accuracy = total_correct / total_attempts if total_attempts > 0 else 0
+        
+        overall_performance[api] = {
+            "total_correct": total_correct,
+            "total_attempts": total_attempts,
+            "overall_accuracy": overall_accuracy
+        }
+    
+    return overall_performance
+
+def calculate_final_performance(openai_performance: Dict[str, Any], anthropic_performance: Dict[str, Any]) -> Dict[str, Any]:
+    total_correct = openai_performance["total_correct"] + anthropic_performance["total_correct"]
+    total_attempts = openai_performance["total_attempts"] + anthropic_performance["total_attempts"]
+    overall_accuracy = total_correct / total_attempts if total_attempts > 0 else 0
+    
+    return {
+        "total_correct": total_correct,
+        "total_attempts": total_attempts,
+        "overall_accuracy": overall_accuracy
+    }
+
+def save_json_file(data: Any, file_path: str):
     with open(file_path, 'w') as f:
-        json.dump(output, f, indent=2)
-    logger.info(f"Partial results written to {file_path}")
+        json.dump(data, f, indent=2)
+    logger.info(f"Results saved to {file_path}")
+
+# New function to extract failed classifications
+def extract_failed_classifications(results: Dict[str, Any]) -> Dict[str, Any]:
+    failed_classifications = {"OpenAI": {}, "Anthropic": {}}
+    
+    for api in ["OpenAI", "Anthropic"]:
+        for company, company_data in results[api].items():
+            if company == f"{api.lower()}_overall_performance":
+                continue
+            failed_classifications[api][company] = [
+                result for result in company_data["results"]
+                if not result["classification"]["match"]
+            ]
+    
+    return failed_classifications
 
 # Main execution
 async def main():
-    output = {"OpenAI": {}, "Anthropic": {}}
     output_file = 'intent_classification_results.json'
+    fails_output_file = 'intent_classification_fails.json'
+    fake_batches = os.getenv("FAKE_BATCHES", "false").lower() == "true"
 
     try:
         dataset = load_dataset('intent_classification_dataset.json')
@@ -258,63 +405,58 @@ async def main():
         anthropic_base_prompt = os.getenv("ANTHROPIC_BASE_PROMPT")
 
         tasks = []
+        company_results = {}
 
         for company_data in dataset:
             company_name = company_data["Company Name"]
+            logger.info(f"Processing company: {company_name}")
             
             # Prepare and process OpenAI batch
             openai_system_prompt = prepare_system_prompt(company_data, openai_base_prompt)
-            openai_batch_file = await prepare_openai_batch(company_data, openai_system_prompt)
-            openai_batch_id = await process_openai_batch(openai_batch_file, company_name)
+            openai_batch_file = prepare_openai_batch(company_data, openai_system_prompt)
+            openai_batch_id = await process_openai_batch(openai_batch_file, company_name, fake_batches)
             
             # Prepare and process Anthropic batch
             anthropic_system_prompt = prepare_system_prompt(company_data, anthropic_base_prompt)
-            anthropic_batch_data = await prepare_anthropic_batch(company_data, anthropic_system_prompt)
-            anthropic_batch_id = await process_anthropic_batch(anthropic_batch_data, company_name)
+            anthropic_batch_data = prepare_anthropic_batch(company_data, anthropic_system_prompt)
+            anthropic_batch_id = await process_anthropic_batch(anthropic_batch_data, company_name, fake_batches)
             
             # Add tasks to check batch status
-            tasks.append(asyncio.create_task(check_batch_status("openai", openai_batch_id, company_name)))
-            tasks.append(asyncio.create_task(check_batch_status("anthropic", anthropic_batch_id, company_name)))
+            tasks.append(asyncio.create_task(check_batch_status("openai", openai_batch_id, company_name, fake_batches, company_data)))
+            tasks.append(asyncio.create_task(check_batch_status("anthropic", anthropic_batch_id, company_name, fake_batches, company_data)))
 
         # Wait for all tasks to complete
-        results = await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
         # Process results
         for i in range(0, len(results), 2):
             company_name = dataset[i//2]["Company Name"]
-            openai_results = results[i]
-            anthropic_results = results[i+1]
+            openai_file = results[i]
+            anthropic_file = results[i+1]
 
-            if openai_results:
-                openai_evaluation = evaluate_results(openai_results, dataset[i//2])
-                output["OpenAI"][company_name] = {
-                    "results": openai_results,
-                    "evaluation": openai_evaluation
-                }
-                write_partial_results(output, output_file)
+            if isinstance(openai_file, Exception):
+                logger.error(f"Error processing OpenAI results for {company_name}: {openai_file}")
+            elif isinstance(anthropic_file, Exception):
+                logger.error(f"Error processing Anthropic results for {company_name}: {anthropic_file}")
+            elif openai_file and anthropic_file:
+                company_results[company_name] = process_company_results(company_name, openai_file, anthropic_file, dataset[i//2])
 
-            if anthropic_results:
-                anthropic_evaluation = evaluate_results(anthropic_results, dataset[i//2])
-                output["Anthropic"][company_name] = {
-                    "results": anthropic_results,
-                    "evaluation": anthropic_evaluation
-                }
-                write_partial_results(output, output_file)
+        overall_performance = calculate_overall_performance(company_results)
+        final_performance = calculate_final_performance(overall_performance["OpenAI"], overall_performance["Anthropic"])
 
-        # Calculate overall performance
-        for api in ["OpenAI", "Anthropic"]:
-            total_correct = sum(company_data["evaluation"]["correct_matches"] for company_data in output[api].values())
-            total_attempts = sum(company_data["evaluation"]["total_attempts"] for company_data in output[api].values())
-            overall_accuracy = total_correct / total_attempts if total_attempts > 0 else 0
-            output[api]["overall_performance"] = {
-                "total_correct": total_correct,
-                "total_attempts": total_attempts,
-                "overall_accuracy": overall_accuracy
-            }
+        output = {
+            "OpenAI": {**company_results, "openai_overall_performance": overall_performance["OpenAI"]},
+            "Anthropic": {**company_results, "anthropic_overall_performance": overall_performance["Anthropic"]},
+            "final_overall_performance": final_performance
+        }
 
-        # Write final results
-        write_partial_results(output, output_file)
+        save_json_file(output, output_file)
         logger.info("Final results written to intent_classification_results.json")
+
+        # Extract and save failed classifications
+        failed_classifications = extract_failed_classifications(output)
+        save_json_file(failed_classifications, fails_output_file)
+        logger.info("Failed classifications written to intent_classification_fails.json")
 
     except Exception as e:
         logger.error(f"An error occurred in the main execution: {e}")
