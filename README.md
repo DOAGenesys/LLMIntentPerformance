@@ -6,11 +6,10 @@ This project implements a Natural Language Understanding (NLU) intent classifica
 
 ### Key Features
 
-1. **Batch Processing**: Instead of making individual API calls for each utterance, the script uses batch processing to send multiple requests at once, improving efficiency and reducing overall processing time.
+1. **Batch Processing**: Instead of making individual API calls for each utterance, the script uses batch processing to send multiple requests at once, improving efficiency and reducing overall costs.
 2. **Prompt Caching**: The script leverages prompt caching mechanisms provided by both OpenAI and Anthropic to reduce costs and improve response times for similar prompts.
 3. **Parallel Processing**: The script processes batches for OpenAI and Anthropic in parallel, allowing for simultaneous evaluation of both services.
 4. **Performance Evaluation**: After processing, the script evaluates the accuracy of intent classifications for both APIs.
-5. **Failed Classifications Output**: The script generates an additional file containing only the failed classifications.
 
 ## How It Works
 
@@ -36,12 +35,13 @@ This project implements a Natural Language Understanding (NLU) intent classifica
 
 5. **Result Processing**:
    - Parses the responses from both APIs into a structured format.
+   - Uses robust JSON parsing to handle different response structures from OpenAI and Anthropic.
+   - Implements error handling to manage unexpected JSON formats or missing data.
    - Evaluates the accuracy of intent classifications for each API.
 
 6. **Output Generation**:
    - Combines the results and evaluations into a single JSON output.
    - Writes the output to a file for further analysis.
-   - Generates an additional file containing only the failed classifications.
 
 ## Input Dataset Format
 
@@ -121,19 +121,15 @@ The output results (`intent_classification_results.json`) will have the followin
 - `evaluation`: Provides performance metrics for each company.
 - `*_overall_performance`: Aggregated performance metrics for each API and overall.
 
-## Failed Classifications Output
-
-The failed classifications (`intent_classification_fails.json`) will have a similar structure to the main results file, but will only include the classifications where `match` is `false`.
-
 ## Environment Variables
 
 - `FAKE_BATCHES`: Set to "true" to simulate batch processing without making actual API calls. Default is "false".
 - `OPENAI_API_KEY`: Your OpenAI API key.
 - `OPENAI_MODEL`: The OpenAI model to use for classification. Results in repo produced with model "gpt-4o-mini".
-- `OPENAI_BASE_PROMPT`: "You are an AI assistant specialized in Natural Language Understanding (NLU) intent classification. Your task is to analyze user utterances and determine the two most appropriate intents for each one. You will be provided with a series of utterances, and you must classify each one according to the intents available for the specific company or domain. Please follow these guidelines: 1. Analyze each utterance carefully to understand the user's intention. 2. Select the two most appropriate intents based on the context and available intent options. 3. If you're unsure about the intents, choose the ones that best match the utterance. 4. Provide your classification in a structured JSON format. Your output must strictly adhere to the following JSON schema: { \"type\": \"object\", \"properties\": { \"classifications\": { \"type\": \"array\", \"items\": { \"type\": \"object\", \"properties\": { \"custom_id\": { \"type\": \"string\", \"description\": \"A unique identifier for each utterance\" }, \"classification\": { \"type\": \"object\", \"properties\": { \"intent1\": { \"type\": \"string\", \"description\": \"The name of the most likely intent\" }, \"confidence1\": { \"type\": \"number\", \"description\": \"Confidence score for intent1 between 0 and 1\" }, \"intent2\": { \"type\": \"string\", \"description\": \"The name of the second most likely intent\" }, \"confidence2\": { \"type\": \"number\", \"description\": \"Confidence score for intent2 between 0 and 1\" } }, \"required\": [\"intent1\", \"confidence1\", \"intent2\", \"confidence2\"], \"additionalProperties\": false } }, \"required\": [\"custom_id\", \"classification\"], \"additionalProperties\": false } } }, \"required\": [\"classifications\"], \"additionalProperties\": false } Remember: - Maintain consistency in your classifications. - Adhere strictly to the JSON schema provided. - Do not include any explanations or additional text outside of the JSON structure"
+- `OPENAI_BASE_PROMPT`: "You are an AI assistant specialized in Natural Language Understanding (NLU) intent classification. Your task is to analyze user utterances and determine the two most appropriate intents for each one. You will be provided with a series of utterances, and you must classify each one according to the intents available for the specific company or domain. Please follow these guidelines: 1. Analyze each utterance carefully to understand the user's intention. 2. Select the two most appropriate intents based on the context and available intent options. 3. If you're unsure about the intents, choose the ones that best match the utterance. 4. Provide your classification in a structured JSON format. Your output must strictly adhere to the following JSON schema: { "type": "object", "properties": { "classifications": { "type": "array", "items": { "type": "object", "properties": { "custom_id": { "type": "string", "description": "A unique identifier for each utterance" }, "classification": { "type": "object", "properties": { "intent1": { "type": "string", "description": "The name of the most likely intent" }, "confidence1": { "type": "number", "description": "Confidence score for intent1 between 0 and 1" }, "intent2": { "type": "string", "description": "The name of the second most likely intent" }, "confidence2": { "type": "number", "description": "Confidence score for intent2 between 0 and 1" } }, "required": ["intent1", "confidence1", "intent2", "confidence2"], "additionalProperties": false } }, "required": ["custom_id", "classification"], "additionalProperties": false } } }, "required": ["classifications"], "additionalProperties": false } Remember: - Maintain consistency in your classifications. - Adhere strictly to the JSON schema provided. - Do not include any explanations or additional text outside of the JSON structure"
 - `ANTHROPIC_API_KEY`: Your Anthropic API key.
 - `ANTHROPIC_MODEL`: The Anthropic model to use for classification. Results in repo produced with model "claude-3-haiku-20240307".
-- `ANTHROPIC_BASE_PROMPT`: "You are an AI assistant specialized in Natural Language Understanding (NLU) intent classification. Your task is to analyze user utterances and determine the two most appropriate intents for each one. You will be provided with a series of utterances, and you must classify each one according to the intents available for the specific company or domain. Please follow these guidelines: 1. Analyze each utterance carefully to understand the user's intention. 2. Select the two most appropriate intents based on the context and available intent options. 3. If you're unsure about the intents, choose the ones that best match the utterance. 4. Provide your classification in a structured JSON format. Your output must strictly adhere to the following JSON structure: { \"classifications\": [ { \"custom_id\": \"string\", \"classification\": { \"intent1\": \"string\", \"confidence1\": number, \"intent2\": \"string\", \"confidence2\": number } } ] } Where: - \"custom_id\" is a unique identifier for each utterance (use the index of the utterance in the batch). - \"intent1\" and \"intent2\" are the names of the two most likely classified intents. - \"confidence1\" and \"confidence2\" are floats between 0 and 1 indicating your confidence in each classification. Remember: - Maintain consistency in your classifications. - Adhere strictly to the JSON format provided. - Do not include any explanations or additional text outside of the JSON structure"
+- `ANTHROPIC_BASE_PROMPT`: "You are an AI assistant specialized in Natural Language Understanding (NLU) intent classification. Your task is to analyze user utterances and determine the two most appropriate intents for each one. You will be provided with a series of utterances, and you must classify each one according to the intents available for the specific company or domain. Please follow these guidelines: 1. Analyze each utterance carefully to understand the user's intention. 2. Select the two most appropriate intents based on the context and available intent options. 3. If you're unsure about the intents, choose the ones that best match the utterance. 4. Provide your classification in a structured JSON format. Your output must strictly adhere to the following JSON structure: { "classifications": [ { "custom_id": "string", "classification": { "intent1": "string", "confidence1": number, "intent2": "string", "confidence2": number } } ] } Where: - "custom_id" is a unique identifier for each utterance (use the index of the utterance in the batch). - "intent1" and "intent2" are the names of the two most likely classified intents. - "confidence1" and "confidence2" are floats between 0 and 1 indicating your confidence in each classification. Remember: - Maintain consistency in your classifications. - Adhere strictly to the JSON format provided. - Do not include any explanations or additional text outside of the JSON structure"
 
 ## Prompt Caching Details
 
@@ -146,14 +142,7 @@ The failed classifications (`intent_classification_fails.json`) will have a simi
 2. Prepare your `intent_classification_dataset.json` file with the required structure.
 3. Run the script:
    ```
-   python nlu_intent_classification.py
+   python LLM_intent_performance.py
    ```
-4. The script will generate two output files:
+4. The script will generate one output file:
    - `intent_classification_results.json`: Contains all classification results and performance metrics.
-   - `intent_classification_fails.json`: Contains only the failed classifications.
-
-## Notes
-
-- The script is designed to handle large datasets efficiently through batch processing.
-- It provides a comprehensive comparison between OpenAI and Anthropic models for NLU intent classification tasks.
-- The failed classifications output can be particularly useful for error analysis and improving the classification system.
