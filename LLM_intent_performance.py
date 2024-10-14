@@ -4,7 +4,7 @@ import time
 import asyncio
 import logging
 import glob
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
@@ -235,6 +235,27 @@ def load_json_file(file_path: str) -> Any:
     with open(file_path, 'r') as f:
         return json.load(f)
 
+def extract_classification(content: str) -> Optional[Dict[str, Any]]:
+    try:
+        # Try to parse the entire content as JSON
+        data = json.loads(content)
+        if 'classifications' in data and len(data['classifications']) > 0:
+            return data['classifications'][0]['classification']
+    except json.JSONDecodeError:
+        # If parsing fails, try to extract the JSON part
+        start = content.find('{')
+        end = content.rfind('}') + 1
+        if start != -1 and end != -1:
+            try:
+                data = json.loads(content[start:end])
+                if 'classifications' in data and len(data['classifications']) > 0:
+                    return data['classifications'][0]['classification']
+            except json.JSONDecodeError:
+                pass
+    
+    logger.warning(f"Failed to extract classification from content: {content}")
+    return None
+
 # Process OpenAI results
 def process_openai_results(file_path: str, dataset: Dict[str, Any]) -> List[Dict[str, Any]]:
     results = load_jsonl_file(file_path)
@@ -242,36 +263,51 @@ def process_openai_results(file_path: str, dataset: Dict[str, Any]) -> List[Dict
     
     for result, example in zip(results, dataset["Examples"]):
         try:
-            content = json.loads(result["response"]["body"]["choices"][0]["message"]["content"])
-            classification = content['classifications'][0]['classification']
+            content = result["response"]["body"]["choices"][0]["message"]["content"]
+            classification = extract_classification(content)
             true_intent = example['class']
             utterance = example['sample_text']
             
+            if classification:
+                processed_results.append({
+                    "custom_id": result["custom_id"],
+                    "utterance": utterance,
+                    "classification": {
+                        "predicted_intent": {
+                            "intent": classification.get('intent1', 'unknown'),
+                            "confidence": classification.get('confidence1', 0.0)
+                        },
+                        "second_predicted_intent": {
+                            "intent": classification.get('intent2', 'unknown'),
+                            "confidence": classification.get('confidence2', 0.0)
+                        },
+                        "true_intent": true_intent,
+                        "match": classification.get('intent1', '').lower() == true_intent.lower()
+                    }
+                })
+            else:
+                logger.warning(f"Empty or invalid classification for OpenAI result: {result['custom_id']}")
+                processed_results.append({
+                    "custom_id": result["custom_id"],
+                    "utterance": utterance,
+                    "classification": {
+                        "predicted_intent": {"intent": "unknown", "confidence": 0.0},
+                        "second_predicted_intent": {"intent": "unknown", "confidence": 0.0},
+                        "true_intent": true_intent,
+                        "match": False
+                    }
+                })
+        except Exception as e:
+            logger.error(f"Error processing OpenAI result: {e}")
+            logger.error(f"Problematic result: {result}")
             processed_results.append({
-                "custom_id": result["custom_id"],
-                "utterance": utterance,
+                "custom_id": result.get("custom_id", "unknown"),
+                "utterance": example.get('sample_text', 'unknown'),
                 "classification": {
-                    "predicted_intent": {
-                        "intent": classification['intent1'],
-                        "confidence": classification['confidence1']
-                    },
-                    "second_predicted_intent": {
-                        "intent": classification['intent2'],
-                        "confidence": classification['confidence2']
-                    },
-                    "true_intent": true_intent,
-                    "match": classification['intent1'].lower() == true_intent.lower()
-                }
-            })
-        except (KeyError, json.JSONDecodeError):
-            processed_results.append({
-                "custom_id": result["custom_id"],
-                "utterance": example['sample_text'],
-                "classification": {
-					"predicted_intent": {"intent": "unknown", "confidence": 0.0},
-						"second_predicted_intent": {"intent": "unknown", "confidence": 0.0},
-						"true_intent": example['class'],
-						"match": False
+                    "predicted_intent": {"intent": "unknown", "confidence": 0.0},
+                    "second_predicted_intent": {"intent": "unknown", "confidence": 0.0},
+                    "true_intent": example.get('class', 'unknown'),
+                    "match": False
                 }
             })
     
@@ -284,35 +320,50 @@ def process_anthropic_results(file_path: str, dataset: Dict[str, Any]) -> List[D
     
     for result, example in zip(results, dataset["Examples"]):
         try:
-            content = json.loads(result['result']['message']['content'][0]['text'])
-            classification = content['classifications'][0]['classification']
+            content = result['result']['message']['content'][0]['text']
+            classification = extract_classification(content)
             true_intent = example['class']
             utterance = example['sample_text']
             
+            if classification:
+                processed_results.append({
+                    "custom_id": result['custom_id'],
+                    "utterance": utterance,
+                    "classification": {
+                        "predicted_intent": {
+                            "intent": classification.get('intent1', 'unknown'),
+                            "confidence": classification.get('confidence1', 0.0)
+                        },						
+						"second_predicted_intent": {
+                            "intent": classification.get('intent2', 'unknown'),
+                            "confidence": classification.get('confidence2', 0.0)
+                        },
+                        "true_intent": true_intent,
+                        "match": classification.get('intent1', '').lower() == true_intent.lower()
+                    }
+                })
+            else:
+                logger.warning(f"Empty or invalid classification for Anthropic result: {result['custom_id']}")
+                processed_results.append({
+                    "custom_id": result['custom_id'],
+                    "utterance": utterance,
+                    "classification": {
+                        "predicted_intent": {"intent": "unknown", "confidence": 0.0},
+                        "second_predicted_intent": {"intent": "unknown", "confidence": 0.0},
+                        "true_intent": true_intent,
+                        "match": False
+                    }
+                })
+        except Exception as e:
+            logger.error(f"Error processing Anthropic result: {e}")
+            logger.error(f"Problematic result: {result}")
             processed_results.append({
-                "custom_id": result['custom_id'],
-                "utterance": utterance,
-                "classification": {
-                    "predicted_intent": {
-                        "intent": classification['intent1'],
-                        "confidence": classification['confidence1']
-                    },
-                    "second_predicted_intent": {
-                        "intent": classification['intent2'],
-                        "confidence": classification['confidence2']
-                    },
-                    "true_intent": true_intent,
-                    "match": classification['intent1'].lower() == true_intent.lower()
-                }
-            })
-        except (KeyError, json.JSONDecodeError):
-            processed_results.append({
-                "custom_id": result['custom_id'],
-                "utterance": example['sample_text'],
+                "custom_id": result.get('custom_id', 'unknown'),
+                "utterance": example.get('sample_text', 'unknown'),
                 "classification": {
                     "predicted_intent": {"intent": "unknown", "confidence": 0.0},
                     "second_predicted_intent": {"intent": "unknown", "confidence": 0.0},
-                    "true_intent": example['class'],
+                    "true_intent": example.get('class', 'unknown'),
                     "match": False
                 }
             })
@@ -377,25 +428,9 @@ def save_json_file(data: Any, file_path: str):
         json.dump(data, f, indent=2)
     logger.info(f"Results saved to {file_path}")
 
-# New function to extract failed classifications
-def extract_failed_classifications(results: Dict[str, Any]) -> Dict[str, Any]:
-    failed_classifications = {"OpenAI": {}, "Anthropic": {}}
-    
-    for api in ["OpenAI", "Anthropic"]:
-        for company, company_data in results[api].items():
-            if company == f"{api.lower()}_overall_performance":
-                continue
-            failed_classifications[api][company] = [
-                result for result in company_data["results"]
-                if not result["classification"]["match"]
-            ]
-    
-    return failed_classifications
-
 # Main execution
 async def main():
     output_file = 'intent_classification_results.json'
-    fails_output_file = 'intent_classification_fails.json'
     fake_batches = os.getenv("FAKE_BATCHES", "false").lower() == "true"
 
     try:
@@ -452,11 +487,6 @@ async def main():
 
         save_json_file(output, output_file)
         logger.info("Final results written to intent_classification_results.json")
-
-        # Extract and save failed classifications
-        failed_classifications = extract_failed_classifications(output)
-        save_json_file(failed_classifications, fails_output_file)
-        logger.info("Failed classifications written to intent_classification_fails.json")
 
     except Exception as e:
         logger.error(f"An error occurred in the main execution: {e}")
