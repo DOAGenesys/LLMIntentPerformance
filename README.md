@@ -6,7 +6,7 @@ This project implements a Natural Language Understanding (NLU) intent classifica
 
 ### Key Features
 
-1. **Batch Processing**: Instead of making individual API calls for each utterance, the script uses batch processing to send multiple requests at once, improving efficiency and reducing overall costs.
+1. **Batch Processing**: Instead of making individual API calls for each utterance, the script uses batch processing to send multiple requests at once, improving efficiency and reducing overall processing time.
 2. **Prompt Caching**: The script leverages prompt caching mechanisms provided by both OpenAI and Anthropic to reduce costs and improve response times for similar prompts.
 3. **Parallel Processing**: The script processes batches for OpenAI and Anthropic in parallel, allowing for simultaneous evaluation of both services.
 4. **Performance Evaluation**: After processing, the script evaluates the accuracy of intent classifications for both APIs.
@@ -146,3 +146,31 @@ The output results (`intent_classification_results.json`) will have the followin
    ```
 4. The script will generate one output file:
    - `intent_classification_results.json`: Contains all classification results and performance metrics.
+
+## Notes
+
+- The script is designed to handle large datasets efficiently through batch processing.
+- It provides a comprehensive comparison between OpenAI and Anthropic models for NLU intent classification tasks.
+
+## Results Discussion
+
+The results obtained from running this script provide valuable insights into the performance of OpenAI and Anthropic models for NLU intent classification tasks. Here's a summary of the results:
+
+- OpenAI Performance:
+  - Total Correct: 1338
+  - Total Attempts: 1554
+  - Overall Accuracy: 86.10%
+
+- Anthropic Performance:
+  - Total Correct: 1237
+  - Total Attempts: 1554
+  - Overall Accuracy: 79.60%
+
+- Final Overall Performance:
+  - Total Correct: 2575
+  - Total Attempts: 3108
+  - Overall Accuracy: 82.85%
+
+These results show that both models perform well in intent classification tasks, with OpenAI's model (gpt-4o-mini) outperforming Anthropic's model (claude-3-haiku-20240307) in this specific dataset and configuration.
+
+It's important to note that these results are specific to the models used (OpenAI's gpt-4o-mini and Anthropic's claude-3-haiku-20240307) and the particular dataset employed. Performance may vary significantly with different models, datasets, or prompt engineering strategies. Factors such as the complexity of the intents, the diversity of the utterances, and the specific domain of the data can all influence the results.
