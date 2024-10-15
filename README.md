@@ -140,7 +140,7 @@ The output results (`intent_classification_results.json` and `banking_intent_cla
 ## Usage
 
 1. Ensure your `.env` file is properly configured with all necessary API keys, model names, and system prompts.
-2. Prepare your `intent_classification_dataset.json` and `banking_intent_classification_dataset.json` files with the required structure.
+2. Make sure `intent_classification_dataset.json` and `banking_intent_classification_dataset.json` files are present.
 3. Run the script:
    ```
    python LLM_intent_performance.py
