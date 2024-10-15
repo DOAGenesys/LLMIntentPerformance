@@ -2,14 +2,14 @@
 
 ## Description
 
-This project implements a Natural Language Understanding (NLU) intent classification system using both OpenAI and Anthropic APIs. The script processes a dataset of utterances, classifies their intents, and evaluates the performance of both AI models.
+This project implements a Natural Language Understanding (NLU) intent classification system using both OpenAI and Anthropic APIs. The script processes two datasets of utterances (a general dataset and a banking-specific dataset), classifies their intents, and evaluates the performance of both AI models.
 
 ### Key Features
 
 1. **Batch Processing**: Instead of making individual API calls for each utterance, the script uses batch processing to send multiple requests at once, improving efficiency and reducing overall processing time.
 2. **Prompt Caching**: The script leverages prompt caching mechanisms provided by both OpenAI and Anthropic to reduce costs and improve response times for similar prompts.
 3. **Parallel Processing**: The script processes batches for OpenAI and Anthropic in parallel, allowing for simultaneous evaluation of both services.
-4. **Performance Evaluation**: After processing, the script evaluates the accuracy of intent classifications for both APIs.
+4. **Performance Evaluation**: After processing, the script evaluates the accuracy of intent classifications for both APIs across multiple datasets.
 5. **Structured Output**: The script enforces JSON/structured outputs for both OpenAI and Anthropic, which is critical for accurate intent performance evaluation.
 
 ## How It Works
@@ -19,7 +19,7 @@ This project implements a Natural Language Understanding (NLU) intent classifica
    - Initializes API clients for both OpenAI and Anthropic.
 
 2. **Data Loading**:
-   - Loads the dataset of utterances to be classified from a JSON file.
+   - Loads two datasets of utterances to be classified from JSON files: a general dataset and a banking-specific dataset.
 
 3. **OpenAI Batch Processing**:
    - Prepares a batch file in JSONL format for OpenAI, including system prompts and utterances.
@@ -41,12 +41,12 @@ This project implements a Natural Language Understanding (NLU) intent classifica
    - Evaluates the accuracy of intent classifications for each API.
 
 6. **Output Generation**:
-   - Combines the results and evaluations into a single JSON output.
-   - Writes the output to a file for further analysis.
+   - Combines the results and evaluations into two separate JSON outputs: one for the general dataset and one for the banking dataset.
+   - Writes the outputs to files for further analysis.
 
 ## Input Dataset Format
 
-The input dataset (`intent_classification_dataset.json`) should be a JSON file with the following structure:
+The input datasets (`intent_classification_dataset.json` and `banking_intent_classification_dataset.json`) should be JSON files with the following structure:
 
 ```json
 [
@@ -69,7 +69,7 @@ The input dataset (`intent_classification_dataset.json`) should be a JSON file w
 
 ## Output Results Format
 
-The output results (`intent_classification_results.json`) will have the following structure:
+The output results (`intent_classification_results.json` and `banking_intent_classification_results.json`) will have the following structure:
 
 ```json
 {
@@ -140,23 +140,26 @@ The output results (`intent_classification_results.json`) will have the followin
 ## Usage
 
 1. Ensure your `.env` file is properly configured with all necessary API keys, model names, and system prompts.
-2. Prepare your `intent_classification_dataset.json` file with the required structure.
+2. Prepare your `intent_classification_dataset.json` and `banking_intent_classification_dataset.json` files with the required structure.
 3. Run the script:
    ```
    python LLM_intent_performance.py
    ```
-4. The script will generate one output file:
-   - `intent_classification_results.json`: Contains all classification results and performance metrics.
+4. The script will generate two output files:
+   - `intent_classification_results.json`: Contains classification results and performance metrics for the general dataset.
+   - `banking_intent_classification_results.json`: Contains classification results and performance metrics for the banking-specific dataset.
 
 ## Notes
 
 - The script is designed to handle large datasets efficiently through batch processing.
-- It provides a comprehensive comparison between OpenAI and Anthropic models for NLU intent classification tasks.
+- It provides a comprehensive comparison between OpenAI and Anthropic models for NLU intent classification tasks across different domains.
 - Enforcing JSON/structured outputs for both OpenAI and Anthropic is critical for accurate intent performance evaluation. This ensures that the responses can be consistently parsed and analyzed, leading to more reliable performance metrics.
 
 ## Results Discussion
 
-The results obtained from running this script provide valuable insights into the performance of OpenAI and Anthropic models for NLU intent classification tasks. Here's a summary of the results:
+The results obtained from running this script provide valuable insights into the performance of OpenAI and Anthropic models for NLU intent classification tasks across different domains. Here's a summary of the results:
+
+### General Dataset Results
 
 - OpenAI Performance (using gpt-4o-mini model):
   - Total Correct: 1338
@@ -173,9 +176,30 @@ The results obtained from running this script provide valuable insights into the
   - Total Attempts: 3108
   - Overall Accuracy: 82.85%
 
-These results show that both models perform well in intent classification tasks, with OpenAI's model slightly outperforming Anthropic's model in this specific dataset and configuration.
+### Banking Dataset Results
 
-It's important to note that these results are specific to the models used (OpenAI's gpt-4o-mini and Anthropic's claude-3-haiku-20240307) and the particular dataset employed. Performance may vary significantly with different models, datasets, or prompt engineering strategies. Factors such as the complexity of the intents, the diversity of the utterances, and the specific domain of the data can all influence the results.
+- OpenAI Performance (using gpt-4o-mini model):
+  - Total Correct: 2051
+  - Total Attempts: 3080
+  - Overall Accuracy: 66.59%
+
+- Anthropic Performance (using claude-3-haiku-20240307 model):
+  - Total Correct: 2159
+  - Total Attempts: 3080
+  - Overall Accuracy: 70.10%
+
+- Final Overall Performance:
+  - Total Correct: 4210
+  - Total Attempts: 6160
+  - Overall Accuracy: 68.34%
+
+These results show that both models perform well in intent classification tasks, with some interesting variations across datasets:
+
+1. In the general dataset, OpenAI's model slightly outperformed Anthropic's model.
+2. In the banking-specific dataset, Anthropic's model performed better than OpenAI's model.
+3. Overall accuracy was higher for the general dataset compared to the banking dataset, suggesting that banking intents might be more challenging to classify (greater number of intents to pick from, 77) or require more domain-specific training.
+
+It's important to note that these results are specific to the models used (OpenAI's gpt-4o-mini and Anthropic's claude-3-haiku-20240307) and the particular datasets employed. Performance may vary significantly with different models, datasets, or prompt engineering strategies. Factors such as the complexity of the intents, the diversity of the utterances, and the specific domain of the data can all influence the results.
 
 Furthermore, it's crucial to understand that the binary nature of "match" or "no match" in the evaluation may not always accurately reflect the quality of the intent classification. Some classifications marked as "no match" might still be valid or reasonable interpretations of the user's intent. Consider the following example:
 
@@ -200,4 +224,4 @@ Furthermore, it's crucial to understand that the binary nature of "match" or "no
 
 In this case, while the original intent was labeled as "Order Placement", the model's prediction of "Special Requests" is also a valid interpretation of the user's utterance. The question about customizing a pizza could reasonably be categorized as both a special request and the beginning of an order placement process. This example highlights the potential for multiple valid intents for a single utterance and the importance of considering context and nuance in intent classification tasks.
 
-Lastly, it's worth emphasizing again the importance of enforcing structured JSON outputs in this process. By requiring both OpenAI and Anthropic models to adhere to a specific JSON format, we ensure consistency in the response structure. This consistency is crucial for accurate parsing, analysis, and comparison of the results. Without this structured output, the evaluation process would be significantly more complex and potentially less reliable. The structured output allows for automated processing of large datasets and enables direct comparisons between different models and across various intents.
+Lastly, it's worth emphasizing again the importance of enforcing structured JSON outputs in this process. By requiring both OpenAI and Anthropic models to adhere to a specific JSON format, we ensure consistency in the response structure. This consistency is crucial for accurate parsing, analysis, and comparison of the results. Without this structured output, the evaluation process would be significantly more complex and potentially less reliable. The structured output allows for automated processing of large datasets and enables direct comparisons between different models and across various intents and domains.
